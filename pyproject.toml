@@ -1,0 +1,100 @@
+[build-system]
+# Tells pip HOW to build/install this project.
+# "setuptools" is the standard Python build backend.
+# "wheel" is the distribution format.
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "pdf-chat"
+# ↑ The package name. Used when you publish to PyPI (we won't, but it's required).
+#   By convention, use hyphens here (pdf-chat), underscores in import paths (pdf_chat).
+
+version = "0.1.0"
+
+description = "RAG chatbot over PDFs using Oracle 26ai + LangChain + Groq"
+
+readme = "README.md"
+
+requires-python = ">=3.10"
+# ↑ Minimum Python version. We're using 3.10 (system Python) — works fine.
+#   The skill says 3.11+ but all libraries used here support 3.10.
+
+dependencies = [
+    # --- Web server ---
+    "fastapi>=0.110",
+    # ↑ The web framework for our adapter.py (/v1/chat/completions endpoint).
+    #   FastAPI auto-generates API docs at http://localhost:8000/docs — very useful.
+
+    "uvicorn[standard]>=0.27",
+    # ↑ The ASGI server that runs FastAPI. "standard" installs extras:
+    #   - uvloop: faster async event loop (C-based)
+    #   - httptools: faster HTTP parsing
+    #   The [standard] syntax is pip's "extras" feature.
+
+    # --- LangChain ---
+    "langchain-core>=0.3",
+    # ↑ Core LangChain package: defines Runnable, BaseMessage, ChatPromptTemplate, etc.
+    #   Everything in LangChain inherits from types defined here.
+
+    "langchain-community>=0.3",
+    # ↑ Community integrations. We specifically need DistanceStrategy from here
+    #   (langchain-oracledb uses it but doesn't re-export it — a known gotcha).
+
+    "langchain-oracledb>=0.1",
+    # ↑ The bridge between LangChain and Oracle.
+    #   Provides: OracleVS (vector store), OracleDocLoader, etc.
+    #   Note: it does NOT provide OracleChatHistory — we write that ourselves (history.py).
+
+    "langchain-huggingface>=0.1",
+    # ↑ Provides HuggingFaceEmbeddings — wraps sentence-transformers in LangChain's
+    #   Embeddings interface so OracleVS can use it.
+
+    # --- Database ---
+    "oracledb>=2.0",
+    # ↑ Oracle's official thin Python driver. "Thin" means it's pure Python —
+    #   no Oracle Client libraries needed on your machine. Just pip install and connect.
+    #   Provides: oracledb.connect(), cursors, transactions.
+
+    "python-dotenv>=1.0",
+    # ↑ Reads .env file and puts all key=value pairs into os.environ.
+    #   One line: from dotenv import load_dotenv; load_dotenv()
+    #   After that, os.environ["GROQ_API_KEY"] works in your code.
+
+    # --- Embeddings (local, no API call) ---
+    "sentence-transformers>=2.7",
+    # ↑ The actual library that runs MiniLM-L6-v2 locally.
+    #   Downloads the model (~90 MB) to ~/.cache/huggingface/ on first use.
+    #   After that, fully offline.
+
+    # --- LLM client (works for Groq too) ---
+    "openai>=1.40",
+    # ↑ OpenAI's official Python client. We use it to talk to Groq because
+    #   Groq's API is 100% OpenAI-compatible. Just change base_url and api_key.
+    #   LangChain's ChatOpenAI class uses this under the hood.
+
+    "langchain-openai>=0.2",
+    # ↑ LangChain's integration layer for OpenAI-compatible APIs.
+    #   Provides ChatOpenAI — the class used in chain.py to call Groq.
+    #   Separate from the base `openai` package: this adds LangChain's
+    #   streaming, callback, and LCEL compatibility on top.
+
+    # --- PDF parsing ---
+    "pypdf>=4",
+    # ↑ Lightweight pure-Python PDF reader. Parses text and metadata per page.
+    #   Good enough for text-heavy PDFs. For complex PDFs with tables/images,
+    #   you'd need "unstructured" (heavier) — but pypdf covers 90% of use cases.
+]
+
+[tool.setuptools.packages.find]
+# Tells setuptools WHERE to find your Python packages.
+where = ["src"]
+# ↑ Look for packages inside the src/ folder.
+#   This is the "src layout" — a modern Python best practice.
+#   It prevents the common mistake of accidentally importing from the project
+#   root instead of the installed package.
+
+[tool.setuptools.package-data]
+# Include non-.py files that are part of the package.
+"*" = ["*.sql", "*.json"]
+# ↑ Includes .sql migration files and any .json files in the package.

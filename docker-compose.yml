@@ -1,0 +1,143 @@
+# docker-compose.yml — pdf-chat project
+#
+# Starts two containers:
+#   1. oracle  — Oracle 26ai Free (your vector + relational database)
+#   2. open-webui — the ChatGPT-like UI that talks to your FastAPI adapter
+#
+# Usage:
+#   docker compose up -d          # start both in background
+#   docker compose down           # stop both (data is preserved in volumes)
+#   docker compose down -v        # stop AND delete all data (nuclear option)
+#   docker compose logs oracle    # view Oracle startup logs
+#
+# All secrets (passwords, ports) come from .env — never hardcoded here.
+
+services:
+
+  # ---------------------------------------------------------------------------
+  # SERVICE 1: Oracle 26ai Free
+  # ---------------------------------------------------------------------------
+  oracle:
+    image: container-registry.oracle.com/database/free:latest
+    # ↑ Official Oracle image from Oracle's own container registry.
+    #   "free:latest" = Oracle Database 23ai Free (also called 26ai in docs).
+    #   No login required to pull this image.
+
+    container_name: oracle-26ai-free-pdf-chat
+    # ↑ A human-readable name for this container.
+    #   Without this, Docker generates a random name like "pdf_chat_oracle_1".
+    #   With a fixed name, you can always do: docker exec oracle-26ai-free-pdf-chat ...
+
+    # restart: unless-stopped
+    # ↑ If Oracle crashes, Docker restarts it automatically.
+    #   "unless-stopped" = restart on crash, but NOT if you manually ran
+    #   "docker compose down" (that's intentional stopping).
+
+    ports:
+      - "127.0.0.1:${ORACLE_PORT:-1521}:1521"
+      # ↑ Maps laptop port → container port.
+      #   ${ORACLE_PORT:-1521} reads ORACLE_PORT from .env; defaults to 1521.
+      #   127.0.0.1 = only YOUR machine can connect (not other devices on WiFi).
+      #   Python connects to: localhost:1521/FREEPDB1
+      - "127.0.0.1:${ORACLE_EM_PORT:-5500}:5500"
+      # ↑ Oracle Enterprise Manager Express — a browser-based DB admin panel.
+      #   Access at: https://localhost:5500/em  (user: SYSTEM, pass: from .env)
+      #   You won't need this often, but it's useful for debugging.
+
+    environment:
+      ORACLE_PWD: ${ORACLE_PWD}
+      # ↑ The password for Oracle's built-in admin users (SYSTEM, SYS, PDBADMIN).
+      #   Comes from .env — never hardcoded here.
+      #   Oracle's entrypoint script reads this and sets up the DB on first boot.
+      ORACLE_CHARACTERSET: AL32UTF8
+      # ↑ Character encoding for the database.
+      #   AL32UTF8 = Unicode (supports all languages, emoji, etc.)
+      #   Always use this — older charsets cause pain with non-ASCII text in PDFs.
+
+    volumes:
+      - oradata:/opt/oracle/oradata
+      # ↑ Persists Oracle's data files.
+      #   Without this, every "docker compose down" would ERASE your database.
+      #   "oradata" is a named Docker volume (defined at the bottom of this file).
+      #   "/opt/oracle/oradata" is where Oracle stores its data inside the container.
+      - ./init-schema:/opt/oracle/scripts/startup:ro
+      # ↑ Any .sql files you put in ./init-schema/ will be run by Oracle
+      #   ONCE on the very first boot (when the volume is empty).
+      #   ":ro" = read-only. Oracle can read the files but can't modify them.
+      #   We use this folder for seed data or schema setup scripts.
+
+    healthcheck:
+      test: [ "CMD-SHELL", "/opt/oracle/checkDBStatus.sh" ]
+      # ↑ Oracle's own script that returns 0 (success) ONLY when the database
+      #   is fully open and accepting connections.
+      #   This is important: Oracle takes ~90 seconds to start. Without this,
+      #   Docker would report "healthy" before Oracle is actually ready.
+      interval: 15s # check every 15 seconds
+      timeout: 10s # if the check takes > 10s, it's considered failed
+      retries: 20 # try up to 20 times (= 5 minutes total) before giving up
+      start_period: 90s # don't start counting retries for the first 90 seconds
+      #                    (Oracle needs ~90s just to initialize on first boot)
+
+      # ---------------------------------------------------------------------------
+      # SERVICE 2: Open WebUI
+      # ---------------------------------------------------------------------------
+  open-webui:
+    image: ghcr.io/open-webui/open-webui:main
+    # ↑ The official Open WebUI image from GitHub Container Registry (ghcr.io).
+    #   This is a full ChatGPT-like interface that supports any OpenAI-compatible API.
+
+    container_name: open-webui
+
+    ports:
+      - "127.0.0.1:3000:8080"
+      # ↑ Open WebUI listens on port 8080 INSIDE the container.
+      #   We map it to port 3000 on your laptop.
+      #   You open your browser at: http://localhost:3000
+
+    environment:
+      - OPENAI_API_BASE_URL=http://host.docker.internal:8000/v1
+      # ↑ Tells Open WebUI where to send chat messages.
+      #   "host.docker.internal" is a special DNS name that points to YOUR LAPTOP
+      #   from inside a Docker container. So this means:
+      #   "send chat requests to port 8000 on the host machine" = our FastAPI adapter.
+      #   The "/v1" is required — OpenAI's API paths all start with /v1.
+      - OPENAI_API_KEY=local-stub-key
+      # ↑ Open WebUI requires an API key field, but our FastAPI adapter doesn't
+      #   actually validate it. So this is a placeholder — any value works.
+      - WEBUI_AUTH=False
+      # ↑ Disables login/signup on Open WebUI.
+      #   For a local single-user setup, authentication is unnecessary friction.
+      #   If you deploy this publicly, set this to True and add a password.
+
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+      # ↑ On Linux, "host.docker.internal" doesn't work by default (it does on Mac/Win).
+      #   This line adds it manually: "host.docker.internal" → the host machine's IP.
+      #   Without this, Open WebUI can't reach our FastAPI adapter on port 8000.
+
+    volumes:
+      - openwebui_data:/app/backend/data
+      # ↑ Persists Open WebUI's settings, conversation history, and model configs.
+      #   Without this, every restart resets Open WebUI to factory defaults.
+
+    depends_on:
+      oracle:
+        condition: service_healthy
+    # ↑ Wait for Oracle's healthcheck to pass before starting Open WebUI.
+    #   This ensures Oracle is fully ready before any app code tries to connect.
+
+    # -----------------------------------------------------------------------------
+    # VOLUMES — named Docker volumes (persistent storage)
+    # -----------------------------------------------------------------------------
+volumes:
+  oradata:
+    name: ${ORACLE_VOLUME:-pdf-chat-oracle-data}
+    # ↑ The actual Docker volume name comes from .env (ORACLE_VOLUME).
+    #   Default: "pdf-chat-oracle-data".
+    #   Named volumes live in Docker's storage area (/var/lib/docker/volumes/)
+    #   NOT inside your project folder. They survive "docker compose down".
+    #   Only "docker compose down -v" deletes them.
+
+  openwebui_data:
+    # ↑ Simpler volume for Open WebUI — no parameterization needed.
+    #   Docker names it automatically as "<compose-project>_openwebui_data".

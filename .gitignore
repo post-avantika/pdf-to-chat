@@ -1,0 +1,55 @@
+# =============================================================================
+# SECRETS — NEVER commit these
+# =============================================================================
+.env
+
+# =============================================================================
+# PYTHON
+# =============================================================================
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+.Python
+.venv/
+venv/
+env/
+*.egg-info/
+dist/
+build/
+.eggs/
+pip-wheel-metadata/
+*.egg
+
+# =============================================================================
+# DATA — your private documents
+# =============================================================================
+data/                 # PDFs you drop in here are YOUR files, not project code
+*.pdf                 # belt-and-suspenders: catch stray PDFs anywhere
+notes/                # for future markdown-notes flavor
+
+# =============================================================================
+# AI MODEL WEIGHTS
+# =============================================================================
+# sentence-transformers downloads MiniLM (~90 MB) to a cache on first run.
+# The default cache is ~/.cache/huggingface/ (outside the project), so
+# nothing downloads INTO this folder. But if someone sets HF_HOME=. or
+# SENTENCE_TRANSFORMERS_HOME=. by accident, this catches it.
+models/
+*.bin
+*.safetensors
+
+# =============================================================================
+# ORACLE / DATABASE
+# =============================================================================
+init-schema/*.sql.bak # backup files if someone edits init SQL
+*.log                 # Oracle listener / SQLcl logs
+
+# =============================================================================
+# EDITOR & OS JUNK
+# =============================================================================
+.DS_Store             # macOS folder metadata
+Thumbs.db             # Windows thumbnail cache
+.idea/                # JetBrains IDE settings
+.vscode/              # VS Code workspace settings (personal, not project)
+*.swp                 # Vim swap files
